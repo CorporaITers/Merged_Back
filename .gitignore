@@ -1,0 +1,63 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# フロントエンド依存関係
+/frontend/node_modules
+/node_modules
+/.pnp
+.pnp.js
+
+# テスト
+/coverage
+/frontend/coverage
+
+# ビルド成果物
+/build
+/frontend/build
+
+# バックエンド
+__pycache__/
+*.py[cod]
+*$py.class
+/backend/__pycache__/
+/backend/**/__pycache__/
+/backend/ocr_temp/
+/backend/uploads/
+/backend/test_results/
+/backend/*.db
+/backend/*.log
+/backend/*.pdf
+/backend/.env
+
+# 環境変数・シークレット
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+/backend/.env
+/frontend/.env
+
+# ログ
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+
+# OS固有
+.DS_Store
+Thumbs.db
+
+# エディタ固有
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 仮想環境
+venv/
+.env
+__pycache__/
+*.pyc
+
+*.db
+DigiCertGlobalRootCA.crt.pem
