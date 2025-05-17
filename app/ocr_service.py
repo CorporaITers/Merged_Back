@@ -47,7 +47,7 @@ def process_document(file_path: str, ocr_id: int, db: Session):
                     logger.debug(f"ページ {i+1} の処理完了")
             except Exception as e:
                 logger.error(f"PDF処理エラー: {str(e)}")
-                update_ocr_result(db, ocr_id, "", "{}", "failed", f"PDF処理エラー: {str(e)}")
+                update_ocr_result(db, ocr_id, 0, "{}", "failed", f"PDF処理エラー: {str(e)}")
                 return
         
         # 画像の場合
@@ -58,13 +58,13 @@ def process_document(file_path: str, ocr_id: int, db: Session):
                 logger.debug("画像のOCR処理完了")
             except Exception as e:
                 logger.error(f"画像処理エラー: {str(e)}")
-                update_ocr_result(db, ocr_id, "", "{}", "failed", f"画像処理エラー: {str(e)}")
+                update_ocr_result(db, ocr_id, 0, "{}", "failed", f"画像処理エラー: {str(e)}")
                 return
         
         else:
             # サポートされていないファイル形式
             logger.warning(f"サポートされていないファイル形式: {file_ext}")
-            update_ocr_result(db, ocr_id, "", "{}", "failed", "サポートされていないファイル形式です")
+            update_ocr_result(db, ocr_id, 0, "{}", "failed", "サポートされていないファイル形式です")
             return
         
         # OCR結果を保存
@@ -81,7 +81,9 @@ def process_document(file_path: str, ocr_id: int, db: Session):
         logger.error(f"OCR処理エラー: {str(e)}")
         update_ocr_result(db, ocr_id, 0, json.dumps({"error": str(e)}), "failed", str(e))
 
-def update_ocr_result(db: Session, ocr_id: int, raw_text_length: int, processed_data: str, status: str, error_message: str = None):
+from typing import Optional
+
+def update_ocr_result(db: Session, ocr_id: int, raw_text_length: int, processed_data: str, status: str, error_message: Optional[str] = None):
     """
     OCR結果を更新します
     
@@ -96,15 +98,15 @@ def update_ocr_result(db: Session, ocr_id: int, raw_text_length: int, processed_
     ocr_result = db.query(models.OCRResult).filter(models.OCRResult.ocr_id == ocr_id).first()
     
     if ocr_result:
-        ocr_result.raw_text = raw_text_length  # 整数値として保存
-        ocr_result.processed_data = processed_data
-        ocr_result.status = status
+        ocr_result.raw_text = raw_text_length  # type: ignore # 整数値として保存
+        ocr_result.processed_data = processed_data # type: ignore
+        ocr_result.status = status # type: ignore
         
         if error_message:
             # エラーメッセージがあれば保存
             error_data = json.loads(processed_data) if processed_data and processed_data != "{}" else {}
             error_data["error"] = error_message
-            ocr_result.processed_data = json.dumps(error_data)
+            ocr_result.processed_data = json.dumps(error_data) # type: ignore
         
         db.commit()
         logger.info(f"OCR結果更新: ID={ocr_id}, ステータス={status}")
@@ -126,9 +128,9 @@ def extract_po_data(ocr_data) -> Dict[str, Any]:
             from app.database import SessionLocal
             db = SessionLocal()
             ocr_result = db.query(models.OCRResult).filter(models.OCRResult.ocr_id == ocr_data).first()
-            if ocr_result and ocr_result.processed_data:
+            if ocr_result and getattr(ocr_result, "processed_data", None):
                 try:
-                    processed_data = json.loads(ocr_result.processed_data)
+                    processed_data = json.loads(str(ocr_result.processed_data))
                     ocr_text = processed_data.get("text_content", "")
                 except json.JSONDecodeError:
                     logger.error(f"JSON解析エラー: {ocr_result.processed_data}")
@@ -297,12 +299,12 @@ def process_ocr_with_enhanced_extraction(file_path: str, ocr_id: int, db: Sessio
         
         # OCR結果を取得
         ocr_result = db.query(models.OCRResult).filter(models.OCRResult.ocr_id == ocr_id).first()
-        if not ocr_result or ocr_result.status != "completed":
+        if not ocr_result or getattr(ocr_result, "status", None) != "completed":
             logger.warning(f"OCR処理が完了していません: ID={ocr_id}")
             return
         
         # processed_dataからテキスト内容を取得
-        processed_data = json.loads(ocr_result.processed_data)
+        processed_data = json.loads(str(ocr_result.processed_data))
         ocr_text = processed_data.get("text_content", "")
         
         # PO情報の抽出
@@ -320,7 +322,7 @@ def process_ocr_with_enhanced_extraction(file_path: str, ocr_id: int, db: Sessio
         }
         
         # 結果の保存
-        ocr_result.processed_data = json.dumps(complete_result)
+        setattr(ocr_result, 'processed_data', json.dumps(complete_result))
         db.commit()
         
         logger.info(f"拡張OCR処理完了: ID={ocr_id}, フォーマット={stats['format_candidates']}")
@@ -328,12 +330,34 @@ def process_ocr_with_enhanced_extraction(file_path: str, ocr_id: int, db: Sessio
     except Exception as e:
         logger.error(f"拡張OCR処理エラー: {str(e)}")
         try:
+            # OCRResult インスタンスの取得
             ocr_result = db.query(models.OCRResult).filter(models.OCRResult.ocr_id == ocr_id).first()
+        
             if ocr_result:
-                ocr_result.status = "failed"
-                processed_data = json.loads(ocr_result.processed_data) if ocr_result.processed_data and ocr_result.processed_data != "{}" else {}
+                # ステータスを "failed" に更新
+                setattr(ocr_result, 'status', "failed")
+
+                # processed_data の取得
+                processed_data_str = str(getattr(ocr_result, "processed_data", "{}"))
+
+                # JSON解析
+                try:
+                    # "{}" は空の辞書として扱う
+                    processed_data = json.loads(processed_data_str) if processed_data_str.strip() != "{}" else {}
+                except json.JSONDecodeError:
+                    logger.error(f"JSON解析エラー: {processed_data_str}")
+                    processed_data = {}
+
+                # エラーメッセージの追加
                 processed_data["error"] = str(e)
-                ocr_result.processed_data = json.dumps(processed_data)
+
+                # JSONとして保存
+                setattr(ocr_result, 'processed_data', json.dumps(processed_data))
+
+                # コミット
                 db.commit()
+                logger.info(f"OCR結果更新完了: ID={ocr_id}, ステータス=failed")
+            
         except Exception as inner_e:
             logger.error(f"エラー情報保存中にエラー発生: {str(inner_e)}")
+

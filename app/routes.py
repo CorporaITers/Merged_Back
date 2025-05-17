@@ -50,7 +50,7 @@ async def upload_file(
     
     # セキュアなファイル名の生成
     filename = file.filename
-    safe_filename = filename.replace(" ", "_")
+    safe_filename = str(filename).replace(" ", "_")
     
     # ファイルのパスを設定
     filepath = os.path.join(UPLOAD_FOLDER, safe_filename)
