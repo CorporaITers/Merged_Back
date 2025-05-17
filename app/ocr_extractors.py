@@ -64,10 +64,21 @@ def identify_po_format(ocr_text: str) -> Tuple[str, float]:
         return "unknown", 0.0
     
     # 合計スコアを計算して信頼度を算出
-    total_possible_score = sum(weight for _, weight in format_features[max(format_scores, key=format_scores.get)])
-    best_format = max(format_scores, key=format_scores.get)
-    confidence = format_scores[best_format] / total_possible_score if total_possible_score > 0 else 0
+    best_format = "unknown"  # デフォルト値を設定
+    if isinstance(format_scores, dict) and all(isinstance(v, (int, float)) for v in format_scores.values()):
+        # 最大スコアのフォーマットを取得
+        best_format = max(format_scores, key=lambda k: format_scores[k])
     
+        # 指定されたフォーマットが format_features に存在するか確認
+        if best_format in format_features:
+            total_possible_score = sum(weight for _, weight in format_features[best_format])
+        else:
+            total_possible_score = 0
+    
+        confidence = format_scores[best_format] / total_possible_score if total_possible_score > 0 else 0
+    else:
+        confidence = 0
+
     logger.info(f"識別したPOフォーマット: {best_format}, 信頼度: {confidence:.2f}, スコア: {format_scores}")
     return best_format, confidence
 
@@ -134,12 +145,6 @@ def extract_format1_data(ocr_text: str) -> Dict[str, Any]:
         result["customer"] = extract_field_by_regex(ocr_text, [
             r"Buyer[’']s Info.*?([A-Za-z0-9\s&.,\-]+(?:Company|Co\.?|Ltd\.?|Inc\.?|Corporation|LLC|Limited))"
         ])
-
-
-
-
-
-
     
     # PO番号の抽出
     result["poNumber"] = extract_field_by_regex(ocr_text, [
@@ -297,6 +302,11 @@ def extract_format2_data(ocr_text: str) -> Dict[str, Any]:
                     "unitPrice": prices[i*2] if i*2 < len(prices) else "",
                     "amount": prices[i*2+1] if i*2+1 < len(prices) else ""
                 })
+
+    # 初期化
+    quantity = None
+    unit_price = None
+    amount = None
 
     # カンマを削除する処理を追加
     if quantity:

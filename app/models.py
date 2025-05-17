@@ -1,5 +1,5 @@
 # models.py　データベースモデルの定義
-from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, Text, DateTime, Float, Numeric, Date
+from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, Text, DateTime, Float, Numeric, Date, FetchedValue
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func, text
 
@@ -15,7 +15,7 @@ class User(Base):
     password_hash = Column(String(255), nullable=False)
     role = Column(String(50), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=text('CURRENT_TIMESTAMP'))
-    updated_at = Column(DateTime(timezone=True), server_default=text('CURRENT_TIMESTAMP'), server_onupdate=text('CURRENT_TIMESTAMP'))
+    updated_at = Column(DateTime(timezone=True), server_default=text('CURRENT_TIMESTAMP'), server_onupdate=FetchedValue())
 
 class PurchaseOrder(Base):
     __tablename__ = "PurchaseOrders"
@@ -31,7 +31,7 @@ class PurchaseOrder(Base):
     destination = Column(String(255), nullable=False)  
     status = Column(String(50), nullable=False, default="手配前")
     created_at = Column(DateTime(timezone=True), server_default=text('CURRENT_TIMESTAMP'))
-    updated_at = Column(DateTime(timezone=True), server_default=text('CURRENT_TIMESTAMP'), server_onupdate=text('CURRENT_TIMESTAMP'))
+    updated_at = Column(DateTime(timezone=True), server_default=text('CURRENT_TIMESTAMP'), server_onupdate=FetchedValue())
 
 class OrderItem(Base):
     __tablename__ = "OrderItems"
@@ -89,6 +89,6 @@ class Input(Base):
     booking_number = Column(String(50), nullable=True)
     memo = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=text('CURRENT_TIMESTAMP'))
-    updated_at = Column(DateTime(timezone=True), server_default=text('CURRENT_TIMESTAMP'), server_onupdate=text('CURRENT_TIMESTAMP'))
+    updated_at = Column(DateTime(timezone=True), server_default=text('CURRENT_TIMESTAMP'), server_onupdate=FetchedValue())
 
 __all__ = ["Base", "User", "PurchaseOrder", "OrderItem", "ShippingSchedule", "Log", "OCRResult", "Input"]
