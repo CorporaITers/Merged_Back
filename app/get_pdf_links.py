@@ -126,8 +126,10 @@ import logging
 from dotenv import load_dotenv
 from pathlib import Path
 import requests
-from bs4 import BeautifulSoup
-from openai import OpenAI
+from bs4 import BeautifulSoup, Tag
+from typing import cast
+# from openai import OpenAI
+from openai import AzureOpenAI
 
 # .env 読み込み
 dotenv_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.env'))
@@ -137,10 +139,16 @@ load_dotenv(dotenv_path)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 logger.info(f"[DEBUG] .env path = {dotenv_path}")
-logger.info(f"[DEBUG] OPENAI_API_KEY = {os.getenv('OPENAI_API_KEY')[:8]}...")
+api_key = os.getenv('OPENAI_API_KEY')
+logger.info(f"[DEBUG] OPENAI_API_KEY = {api_key[:8]}..." if api_key else "[DEBUG] OPENAI_API_KEY is not set.")
 
 # OpenAIクライアント初期化
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+client = AzureOpenAI(
+    api_key=os.getenv("OPENAI_API_KEY"),
+    api_version=os.getenv("OPENAI_API_VERSION"),
+    azure_endpoint=os.getenv("OPENAI_API_BASE") or ""
+)
 logger.info("[DEBUG] OpenAI client initialized successfully.")
 
 # 地域マッピング
@@ -152,7 +160,7 @@ region_map = {
     "EUROPE MEDITERRANEAN": "地中海輸出",
     "EAST ASIA": "中国・香港・海峡地・インドネシア輸出",
     "SOUTHEAST ASIA": "タイ・ベトナム・韓国・台湾・フィリピン輸出",
-    "MIDDLE EAST": "中東・南アジア輸出",
+    "MIDDLE EAST": "西アジア_中東輸出",
     "SOUTH AMERICA WEST COAST": "南米西岸輸出",
     "SOUTH AMERICA EAST COAST": "南米東岸輸出",
     "AFRICA": "アフリカ輸出",
@@ -171,7 +179,10 @@ def get_region_by_chatgpt(destination_keyword, silent=False):
             model="gpt-4o",
             messages=[{"role": "user", "content": prompt}],
         )
-        result = response.choices[0].message.content.strip().upper().strip('"')
+        content = response.choices[0].message.content
+        if content is None:
+            raise ValueError("ChatGPTの返答が空です")
+        result = content.strip().upper().strip('"')
 
         if not silent:
             logger.info(f"[ChatGPT返答] {result}")

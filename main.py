@@ -403,7 +403,7 @@ async def extract_schedule_positions(
     except Exception as e:
         # import logging
         # logger = logging.getLogger(__name__)
-        logger.error(f"PyMuPDF解析失敗: {e}")
+        logger.error(f"PDF解析失敗: {e}")
         return None
 
     finally:
