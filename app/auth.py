@@ -75,7 +75,10 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
         logger.debug(f"トークンの検証を開始: {token[:10]}...")
         
         payload = jwt.decode(token, config.SECRET_KEY, algorithms=[config.ALGORITHM])
-        email: str = payload.get("sub")
+        email = payload.get("sub")
+        if not isinstance(email, str):
+            logger.warning("ペイロードに有効なemailが含まれていません")
+            raise credentials_exception
         
         logger.debug(f"デコードされたペイロード: {payload}")
         
