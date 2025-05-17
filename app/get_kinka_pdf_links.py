@@ -53,12 +53,13 @@ import sys
 import json
 import logging
 import requests
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
 def get_fixed_pdf_link_for_shanghai():
+    href = "N/A"  # 初期値を設定
     url = "https://www.kinka-agency.com/asp/newsitem.asp?nw_id=54"
     headers = {
         "User-Agent": "Mozilla/5.0"
@@ -75,8 +76,9 @@ def get_fixed_pdf_link_for_shanghai():
     links = soup.find_all("a", href=True)
 
     for link in links:
-        href = link["href"]
-        if ".pdf" in href:
+        if isinstance(link, Tag):
+            href = link.get("href", "N/A")  # `href` が存在しない場合は "N/A" として扱う
+        if isinstance(href, str) and ".pdf" in href:
             full_url = (
                 f"https://www.kinka-agency.com{href}"
                 if href.startswith("/")
