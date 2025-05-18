@@ -218,11 +218,12 @@ def get_pdf_links(destination_keyword, silent=False):
     links = soup.find_all("a", href=True)
 
     for link in links:
-        href = link["href"]
-        text = link.get_text(strip=True)
+        tag = cast(Tag, link)
+        href = tag.get("href", "N/A")  # ✅ `get()` メソッドが使えるようになる
+        text = tag.get_text(strip=True)
 
-        if href.endswith(".pdf") and region in text:
-            full_url = f"https://jp.one-line.com{href}" if href.startswith("/") else href
+        if str(href).endswith(".pdf") and region in text:
+            full_url = f"https://jp.one-line.com{href}" if str(href).startswith("/") else href
             pdf_links.append(full_url)
             if not silent:
                 logger.info(f"[抽出] {text} -> {full_url}")
