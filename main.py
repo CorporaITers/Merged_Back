@@ -89,10 +89,10 @@ def on_startup():
 
 # MySQL接続情報
 DB_CONFIG = {
-    "host": os.getenv("MYSQL_HOST", "tech0-gen-8-step4-dtx-db.mysql.database.azure.com"),
-    "user": os.getenv("MYSQL_USER", "ryoueno"),
-    "password": os.getenv("MYSQL_PASSWORD", "tech0-dtxdb"),
-    "database": "corporaiters"
+    "host": os.getenv("DB_HOST"),
+    "user": os.getenv("DB_USER"),
+    "password": os.getenv("DB_PASSWORD"),
+    "database": os.getenv("DB_NAME")
 }
 
 def get_db_connection():
