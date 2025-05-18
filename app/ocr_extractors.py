@@ -120,31 +120,31 @@ def extract_format1_data(ocr_text: str) -> Dict[str, Any]:
     }
     
 # 顧客名の抽出（Buyer’s Info ブロックを直接パース）
-    customer_block = re.search(
-        r"\(Buyer[’']s Info\)\s*\n+(.*?)(?:\n{2,}|Purchase Order|Address:|Ship to:)",
-        ocr_text,
-        re.IGNORECASE | re.DOTALL
-    )
+    # customer_block = re.search(
+    #     r"\(Buyer[’']s Info\)\s*\n+(.*?)(?:\n{2,}|Purchase Order|Address:|Ship to:)",
+    #     ocr_text,
+    #     re.IGNORECASE | re.DOTALL
+    # )
 
-    if customer_block:
-        customer_lines = customer_block.group(1).split("\n")
-        cleaned_lines = [
-            line.strip() for line in customer_lines
-            if line.strip()
-            and not re.search(r'^(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[\s,]*\d{1,2},\s*\d{4}$', line, re.IGNORECASE)  # 日付形式完全一致
-            and not re.search(r'\d{1,2},\s*\d{4}', line)  # 21, 2025 形式も排除
-            and not re.search(r'@|email|address|phone|fax|order|ship to', line, re.IGNORECASE)
-        ]
-        company_line = next(
-            (line for line in cleaned_lines if re.search(r'(Company|Co\.|Ltd\.|Inc\.|LLC|Corp\.|Corporation|Limited)', line)),
-            None
-        )
-        result["customer"] = company_line or (cleaned_lines[0] if cleaned_lines else "")
-    else:
+    # if customer_block:
+    #     customer_lines = customer_block.group(1).split("\n")
+    #     cleaned_lines = [
+    #         line.strip() for line in customer_lines
+    #         if line.strip()
+    #         and not re.search(r'^(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[\s,]*\d{1,2},\s*\d{4}$', line, re.IGNORECASE)  # 日付形式完全一致
+    #         and not re.search(r'\d{1,2},\s*\d{4}', line)  # 21, 2025 形式も排除
+    #         and not re.search(r'@|email|address|phone|fax|order|ship to', line, re.IGNORECASE)
+    #     ]
+    #     company_line = next(
+    #         (line for line in cleaned_lines if re.search(r'(Company|Co\.|Ltd\.|Inc\.|LLC|Corp\.|Corporation|Limited)', line)),
+    #         None
+    #     )
+    #     result["customer"] = company_line or (cleaned_lines[0] if cleaned_lines else "")
+    # else:
         # フォールバック
-        result["customer"] = extract_field_by_regex(ocr_text, [
-            r"Buyer[’']s Info.*?([A-Za-z0-9\s&.,\-]+(?:Company|Co\.?|Ltd\.?|Inc\.?|Corporation|LLC|Limited))"
-        ])
+    result["customer"] = extract_field_by_regex(ocr_text, [
+        r"Buyer[’']s Info.*?([A-Za-z0-9\s&.,\-]+(?:Company|Co\.?|Ltd\.?|Inc\.?|Corporation|LLC|Limited))"
+    ])
     
     # PO番号の抽出
     result["poNumber"] = extract_field_by_regex(ocr_text, [
