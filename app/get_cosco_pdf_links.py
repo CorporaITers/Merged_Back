@@ -14,7 +14,7 @@ import re
 
 # ✅ まず dotenv_path を定義
 dotenv_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.env'))
-load_dotenv(dotenv_path)
+load_dotenv(dotenv_path, override=True)
 
 # ログ設定
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
