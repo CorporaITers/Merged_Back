@@ -27,7 +27,7 @@ from app.app_router import router as po_router  # ← 上で変換したモジ�
 from fastapi.exceptions import RequestValidationError
 
 # ローカル用 .env 読み込み（Azure環境では無視される）
-load_dotenv()
+load_dotenv(override=True)
 
 # ログ設定
 logging.basicConfig(
@@ -290,7 +290,7 @@ async def extract_schedule_positions(
             table_data += f"\n--- テーブル {i + 1} ---\n"
             table_data += table.df.to_string()
 
-        logger.info(f"抽出データ:\n{table_data}")
+        # logger.info(f"抽出データ:\n{table_data}")
 
         prompt = f"""
 以下はPDFから抽出されたスケジュール候補の行です。

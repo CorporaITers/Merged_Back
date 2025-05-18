@@ -133,7 +133,7 @@ from openai import AzureOpenAI
 
 # .env 読み込み
 dotenv_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.env'))
-load_dotenv(dotenv_path)
+load_dotenv(dotenv_path, override=True)
 
 # ロガー設定
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -149,6 +149,7 @@ client = AzureOpenAI(
     api_version=os.getenv("OPENAI_API_VERSION"),
     azure_endpoint=os.getenv("OPENAI_API_BASE") or ""
 )
+
 logger.info("[DEBUG] OpenAI client initialized successfully.")
 
 # 地域マッピング
