@@ -118,9 +118,10 @@ def get_pdf_links(departure_port: str, destination_port: str, silent=False):
 
     response = session.get(url_result, params=params, headers=headers)
     logger.info(f"[DEBUG] HTTP status: {response.status_code}")
-    soup = BeautifulSoup(response.text, "html.parser")
-
+    
     pdf_links = []
+
+    soup = BeautifulSoup(response.text, "html.parser")
 
     for link in soup.find_all("a", href=True):
         if isinstance(link, Tag):
