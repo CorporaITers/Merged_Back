@@ -384,7 +384,7 @@ async def extract_schedule_positions(
             with open(log_path, "a", newline='', encoding='utf-8') as log_file:
                 writer = csv.writer(log_file)
                 if not file_exists:
-                    writer.writerow(["timestamp", "url", "departure", "destination", "input_date", "etd", "eta", "vessel", "feedback"])
+                    writer.writerow(["timestamp", "url", "departure", "destination", "input_date", "etd", "eta", "vessel", "voy", "company", "feedback"])
                 writer.writerow(new_entry)
 
             return {
@@ -437,7 +437,11 @@ async def get_pdf_links_from_one(destination_keyword: str) -> list[str]:
             env=os.environ.copy(),
         )
 
-        logger.info(f"[DEBUG] get_pdf_links.py stdout:\n{result.stdout}")
+        # 正常な出力が存在する場合のみログ出力
+        if result.stdout:
+            logger.info(f"[DEBUG] get_pdf_links.py stdout:\n{result.stdout}")
+        
+        # 出力結果を JSON としてパース
         return json.loads(result.stdout)
     
     except json.JSONDecodeError as je:
@@ -692,8 +696,8 @@ async def recommend_shipping(req: ShippingRequest):
     logger.info("📦 リクエスト受信:")
     logger.info(f"  Departure Port: {req.departure_port}")
     logger.info(f"  Destination Port: {req.destination_port}")
-    logger.info(f"  ETA: {req.etd_date}")
-    logger.info(f"  ETD: {req.eta_date}")
+    logger.info(f"  ETD: {req.etd_date}")
+    logger.info(f"  ETA: {req.eta_date}")
 
     if not req.etd_date and not req.eta_date:
         return {"error": "ETDかETAのいずれかを指定してください。"}
