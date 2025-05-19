@@ -60,7 +60,7 @@ destination_region_map = {
 
 def get_region_by_chatgpt(destination_keyword: str, silent=False):
     prompt = f"""
-次の目的地「{destination_keyword}」が、Shipmentlink社のスケジュール表示ページで使われるカテゴリのどれに該当しますか？
+次の目的地「{destination_keyword}」が、EVERGREEN SHIPPING社のスケジュール表示ページで使われるカテゴリのどれに該当しますか？
 以下から英語1単語で出力してください（他の文は不要）：
 
 ["NORTH AMERICA", "CENTRAL AMERICA", "SOUTH AMERICA", "EUROPE", "OCEANIA", "SOUTHEAST ASIA", "INDIAN SUBCONTINENT", "CHINA", "TAIWAN", "HONG KONG", "KOREA", "MIDDLE EAST", "AFRICA"]

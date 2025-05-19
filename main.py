@@ -776,12 +776,12 @@ async def recommend_shipping(req: ShippingRequest):
     else:
         logger.info("📛 KINKA社は『上海』のときのみ検索対象となるため、今回はスキップされました。")
 
-# ========== Shipmentlink社 ========== 
-    logger.info(f"🔍 Shipmentlink社 get_pdf_links.py に渡すキーワード: '{keyword}'")
+# ========== Evergreen社 ========== 
+    logger.info(f"🔍 Evergreen社 get_pdf_links.py に渡すキーワード: '{keyword}'")
     pdf_urls_shipmentlink = await get_pdf_links_from_shipmentlink(departure, destination)
     
     if not pdf_urls_shipmentlink:
-        logger.warning("⚠️ Shipmentlink社のPDFリンク取得に失敗しました。")
+        logger.warning("⚠️ Evergreen社のPDFリンク取得に失敗しました。")
     else:
         success = False
         for pdf_url in pdf_urls_shipmentlink:
@@ -793,14 +793,14 @@ async def recommend_shipping(req: ShippingRequest):
                 eta_date=eta_date
             )
             if result:
-                result["company"] = "Shipmentlink"
+                result["company"] = "EVERGREEN"
                 result["fare"] = str(get_freight_rate(departure, destination, "Shipmentlink")) if not None else "N/A"
                 results.append(result)
-                logger.info(f"[Shipmentlink社マッチ] {result}")
+                logger.info(f"[Evergreen社マッチ] {result}")
                 success = True
                 break  # 最初のマッチで止める
         if not success:
-            logger.warning("⚠️ Shipmentlink社のスケジュール抽出に失敗しました。")
+            logger.warning("⚠️ Evergreen社のスケジュール抽出に失敗しました。")
 
     # ========== Maersk社 ========== 
     # maersk_result = await get_schedule_from_maersk(departure, destination, etd_date=req.etd_date)
