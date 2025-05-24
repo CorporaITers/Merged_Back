@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 import re
 import logging
 import tempfile
+from jose import jwt, JWTError
 
 from app.database import SessionLocal, engine, test_db_connection
 from app import models
@@ -59,11 +60,31 @@ def get_db():
     finally:
         db.close()
 
+@router.get("/api/auth/verify")
+def verify_token(request: Request):
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        return {"valid": False}
+
+    token = auth_header.split(" ")[1]
+
+    try:
+        payload = jwt.decode(token, config.SECRET_KEY, algorithms=[config.ALGORITHM])
+        # sub にメールアドレスが入っている想定
+        email = payload.get("sub")
+        if not email:
+            logger.warning("verify_token: sub(email)がトークンに含まれていません")
+            return {"valid": False}
+        return {"valid": True}
+    except JWTError as e:
+        logger.warning(f"verify_token: JWT検証失敗 - {e}")
+        return {"valid": False}
+
 # 認証関連のエンドポイント
 @router.post("/api/auth/login", response_model=schemas.Token)
 def login(user_data: schemas.UserLogin, db: Session = Depends(get_db)):
     user = db.query(models.User).filter(models.User.email == user_data.email).first()
-    if not user or not verify_password(user_data.password, user.password_hash):
+    if not user or not verify_password(user_data.password, user.password_hash.value):
         logger.warning(f"ログイン失敗: {user_data.email}")
         raise HTTPException(
             status_code=401,
@@ -109,13 +130,15 @@ async def upload_document(
     background_tasks: BackgroundTasks = BackgroundTasks(),
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
-    request: Request = None,  # リクエストオブジェクトを追加
+    request: Optional[Request] = None,  # リクエストオブジェクトを追加
 ):
     logger.info(f"Request query params: {request.query_params if request else 'N/A'}")
     logger.info(f"Received file upload request: {file.filename}")
     
     try:
         # ファイル拡張子の確認
+        if not file.filename:
+            raise HTTPException(status_code=400, detail="ファイル名が空です")
         file_ext = os.path.splitext(file.filename)[1].lower()
         if file_ext not in ['.pdf', '.png', '.jpg', '.jpeg']:
             logger.warning(f"サポートされていないファイル形式: {file_ext}")
@@ -164,7 +187,7 @@ async def upload_document(
             background_tasks.add_task(
                 process_document,
                 file_path=file_location,  # ファイルパスは直接関数に渡す
-                ocr_id=ocr_result.ocr_id,
+                ocr_id=ocr_result.ocr_id.value,
                 db=db
             )
             logger.info(f"Added background task for OCR processing with file: {file_location}")
@@ -216,7 +239,7 @@ async def extract_order_data(
         logger.warning(f"OCR結果が見つかりません: ID={ocr_id}")
         raise HTTPException(status_code=404, detail="指定されたOCR結果が見つかりません")
     
-    if ocr_result.status != "completed":
+    if ocr_result.status != "completed": # type: ignore
         logger.warning(f"OCR処理が完了していません: ID={ocr_id}, ステータス={ocr_result.status}")
         raise HTTPException(status_code=400, detail="OCR処理がまだ完了していません")
     
@@ -300,7 +323,7 @@ async def get_po_list(
             shipping_info = db.query(models.ShippingSchedule).filter(models.ShippingSchedule.po_id == po.po_id).first()
             
             # 製品名の結合
-            product_names = ", ".join([item.product_name for item in items])
+            product_names = ", ".join([str(item.product_name) for item in items])
             
             # 数量の計算（エラー処理を追加）
             total_quantity = 0
@@ -311,7 +334,7 @@ async def get_po_list(
                         quantity_str = item.quantity or "0"
                         if isinstance(quantity_str, str):
                             quantity_str = quantity_str.replace(',', '')
-                        quantity_value = float(quantity_str)
+                        quantity_value = float(quantity_str) # type: ignore
                         total_quantity += quantity_value
                     except (ValueError, TypeError):
                         # 変換できない場合は0として扱う
@@ -323,8 +346,8 @@ async def get_po_list(
                 "status": po.status,
                 "acquisitionDate": input_info.po_acquisition_date if input_info else None,
                 "organization": input_info.organization if input_info else None,
-                "invoice": "完了" if input_info and input_info.invoice_number else "",
-                "payment": "完了" if input_info and input_info.payment_status == "completed" else "",
+                "invoice": "完了" if input_info and input_info.invoice_number is not None and input_info.invoice_number.value else "",
+                "payment": "完了" if input_info and input_info.payment_status.value == "completed" else "",
                 "booking": "完了" if shipping_info else "",
                 "manager": current_user.name,
                 "invoiceNumber": input_info.invoice_number if input_info else None,
@@ -438,12 +461,12 @@ async def update_po_status(
         raise HTTPException(status_code=400, detail="無効なステータスです")
     
     # 計上済みから他のステータスへの変更を禁止
-    if po.status == "計上済" and status_data.status != "計上済":
+    if po.status == "計上済" and status_data.status != "計上済": # type: ignore
         logger.warning(f"PO更新失敗（計上済みPOの変更）: ID={po_id}")
         raise HTTPException(status_code=400, detail="計上済みのPOのステータスは変更できません")
     
     old_status = po.status
-    po.status = status_data.status
+    po.status = status_data.status # type: ignore
     db.commit()
     
     # ステータス更新のログ記録
@@ -558,8 +581,8 @@ async def add_shipping_info(
         shipping_info.container_size = shipping_data.get("container_size", shipping_info.container_size)
     
     # もし予約番号が設定されたら、ステータスを「手配済」に変更
-    if shipping_info.booking_number and po.status == "手配中":
-        po.status = "手配済"
+    if shipping_info.booking_number and po.status == "手配中": # type: ignore
+        po.status = "手配済" # type: ignore
     
     db.commit()
     
