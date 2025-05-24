@@ -84,7 +84,7 @@ def verify_token(request: Request):
 @router.post("/api/auth/login", response_model=schemas.Token)
 def login(user_data: schemas.UserLogin, db: Session = Depends(get_db)):
     user = db.query(models.User).filter(models.User.email == user_data.email).first()
-    if not user or not verify_password(user_data.password, user.password_hash.value):
+    if not user or not verify_password(user_data.password, user.password_hash): # type: ignore
         logger.warning(f"ログイン失敗: {user_data.email}")
         raise HTTPException(
             status_code=401,
@@ -125,12 +125,12 @@ def register_user(user_data: schemas.UserCreate, db: Session = Depends(get_db)):
 # OCR関連のエンドポイント
 @router.post("/api/ocr/upload")
 async def upload_document(
+    request: Request,
     file: UploadFile = File(...),
     local_kw: Optional[str] = Query(None),  # local_kwクエリパラメータを追加
     background_tasks: BackgroundTasks = BackgroundTasks(),
     current_user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-    request: Optional[Request] = None,  # リクエストオブジェクトを追加
+    db: Session = Depends(get_db)
 ):
     logger.info(f"Request query params: {request.query_params if request else 'N/A'}")
     logger.info(f"Received file upload request: {file.filename}")
