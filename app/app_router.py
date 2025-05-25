@@ -187,7 +187,7 @@ async def upload_document(
             background_tasks.add_task(
                 process_document,
                 file_path=file_location,  # ファイルパスは直接関数に渡す
-                ocr_id=ocr_result.ocr_id.value,
+                ocr_id=ocr_result.ocr_id, # type: ignore
                 db=db
             )
             logger.info(f"Added background task for OCR processing with file: {file_location}")
