@@ -30,33 +30,18 @@ jobs:
           source venv/bin/activate
       
       - name: Install dependencies
-        run: |
-          source venv/bin/activate
-          pip install -r requirements.txt
-        
-      # デバッグ: ファイル構造を確認
-      - name: List files before zipping
-        run: |
-          echo "=== Current directory contents ==="
-          ls -la
-          echo "=== Checking specific files ==="
-          ls -la apt.txt || echo "apt.txt not found"
-          ls -la requirements.txt || echo "requirements.txt not found"
-          ls -la app/ || echo "app/ directory not found"
-          ls -la main.py || echo "main.py not found"
+        run: pip install -r requirements.txt
 
       - name: Zip artifact for deployment
-        run: |
-          # 仮想環境を除外してzip
-          zip -r release.zip . -x "venv/*" ".git/*" ".github/*" "node_modules/*" ".next/*" "src/*"
-          echo "=== Contents of zip file ==="
-          unzip -l release.zip | head -20
+        run: zip release.zip ./* -r
 
       - name: Upload artifact for deployment jobs
         uses: actions/upload-artifact@v4
         with:
           name: python-app
-          path: release.zip
+          path: |
+            release.zip
+            !venv/
 
   deploy:
     runs-on: ubuntu-latest
@@ -72,12 +57,7 @@ jobs:
           name: python-app
 
       - name: Unzip artifact for deployment
-        run: |
-          unzip release.zip
-          echo "=== Files after unzip ==="
-          ls -la
-          ls -la apt.txt || echo "apt.txt not found after unzip"
-          ls -la requirements.txt || echo "requirements.txt not found after unzip"
+        run: unzip release.zip
 
       - name: 'Deploy to Azure Web App'
         uses: azure/webapps-deploy@v3
