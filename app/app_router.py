@@ -648,7 +648,7 @@ async def startup_event():
             dev_user = db.query(models.User).filter(models.User.email == "dev@example.com").first()
             if not dev_user:
                 logger.info("開発用ユーザーを作成します")
-                hashed_password = get_password_hash("devpass")
+                hashed_password = get_password_hash("devpasstech0")
                 dev_user = models.User(
                     name="開発ユーザー",
                     email="dev@example.com",
