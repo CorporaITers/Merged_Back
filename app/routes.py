@@ -89,8 +89,8 @@ async def upload_file(
     background_tasks.add_task(
         process_ocr_with_enhanced_extraction,
         file_data,
-        file.filename,
-        ocr_id  # 数値型のIDを渡す
+        file.filename or "",
+        ocr_id  # 数値型のIDを渡す # type: ignore
     )
     
     return {
@@ -148,14 +148,14 @@ async def get_ocr_data(ocr_id: str, db: Session = Depends(get_db)):
         if not ocr_result:
             raise HTTPException(status_code=404, detail="OCR結果が見つかりません")
         
-        if ocr_result.status != "completed":
+        if ocr_result.status != "completed":  # type: ignore
             raise HTTPException(status_code=202, detail="OCR処理がまだ完了していません")
         
         # processed_dataからデータを取得
         processed_data_str = ocr_result.processed_data or "{}"
         
         try:
-            processed_data = json.loads(processed_data_str)
+            processed_data = json.loads(str(processed_data_str))
         except json.JSONDecodeError:
             processed_data = {}
         
