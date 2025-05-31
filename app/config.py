@@ -1,4 +1,4 @@
-# config.py
+# config.py - 現行コードをベースにした修正版（Azure App Service対応）
 import os
 import tempfile
 from pathlib import Path
@@ -25,9 +25,18 @@ SECRET_KEY = os.getenv("SECRET_KEY", "your_secret_key_should_be_at_least_32_char
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "1440"))
 
-# アプリケーション設定 - 一時ディレクトリを動的に取得
-UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER", tempfile.gettempdir())
-OCR_TEMP_FOLDER = os.getenv("OCR_TEMP_FOLDER", tempfile.gettempdir())
+# アプリケーション設定 - Azure App Service対応
+# 一時ディレクトリを Azure App Service の /tmp に設定
+UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER", "/tmp/po_uploads")
+OCR_TEMP_FOLDER = os.getenv("OCR_TEMP_FOLDER", "/tmp/po_uploads")
+
+# OCR設定（追加）
+TESSERACT_CMD = os.getenv("TESSERACT_CMD", "/usr/bin/tesseract")
+TEMP_DIR = "/tmp/po_uploads"
+
+# ファイルアップロード設定（追加）
+MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", "10485760"))  # 10MB
+ALLOWED_EXTENSIONS = {'pdf', 'png', 'jpg', 'jpeg'}
 
 # 開発モード設定
 DEV_MODE = os.getenv("DEV_MODE", "True").lower() in ("true", "1", "t")
@@ -37,8 +46,17 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OCR_TEMP_FOLDER, exist_ok=True)
 
 # データベース接続URL（SQLAlchemy形式）
-# MySQL+mysqlconnectorの形式を使用してAzure MySQL接続
+# Azure MySQL接続用のSSL設定を含める
 if DB_SSL_REQUIRED:
-    DATABASE_URL = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}?ssl=true"
+    # Azure MySQL用のSSL設定を強化
+    DATABASE_URL = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}?ssl_ca=/opt/ssl/BaltimoreCyberTrustRoot.crt.pem&ssl_verify_cert=true&ssl_verify_identity=true"
+    
+    # 本番環境でSSL証明書が見つからない場合のフォールバック
+    # （Azure App Serviceでは自動的にSSL接続が有効になる場合がある）
+    if not os.path.exists("/opt/ssl/BaltimoreCyberTrustRoot.crt.pem"):
+        DATABASE_URL = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}?ssl=true"
 else:
     DATABASE_URL = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+
+# ログ設定（追加）
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
