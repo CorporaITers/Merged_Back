@@ -48,7 +48,7 @@ def get_dev_user(db: Session):
         dev_user = models.User(
             name="開発ユーザー",
             email="dev@example.com",
-            password_hash=get_password_hash("devpass"),
+            password_hash=get_password_hash("devpasstech0"),
             role="admin"
         )
         db.add(dev_user)
