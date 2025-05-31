@@ -1,4 +1,4 @@
-# routes.py - 現行config.pyを使用した修正版
+# routes.py - Azure App Service対応版（修正済み）
 
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Depends, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,12 +13,9 @@ from sqlalchemy.orm import Session
 # OCRサービスの関数をインポート
 from app.ocr_service import process_ocr_with_enhanced_extraction
 
-# データベース関連のインポート（既存）
+# データベース関連のインポート
 from app.database import get_db
 from app import models
-
-# 現行config.pyから設定をインポート
-from app.config import MAX_FILE_SIZE, ALLOWED_EXTENSIONS
 
 app = FastAPI()
 
@@ -31,8 +28,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ファイル設定
+ALLOWED_EXTENSIONS = {'pdf', 'png', 'jpg', 'jpeg'}
+
 def allowed_file(filename):
-    """ファイル形式チェック（現行config.pyのALLOWED_EXTENSIONSを使用）"""
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
@@ -44,7 +43,7 @@ async def upload_file(
 ):
     """
     ファイルをアップロードしてOCR処理を開始します。
-    現行システムとの互換性を保った修正版
+    Azure App Service対応版
     """
     if not file:
         raise HTTPException(status_code=400, detail="ファイルがありません")
@@ -61,10 +60,9 @@ async def upload_file(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"ファイル読み取りエラー: {str(e)}")
     
-    # ファイルサイズチェック（現行config.pyのMAX_FILE_SIZEを使用）
-    if len(file_data) > MAX_FILE_SIZE:
-        max_size_mb = MAX_FILE_SIZE / (1024 * 1024)
-        raise HTTPException(status_code=413, detail=f"ファイルサイズが大きすぎます（最大{max_size_mb:.0f}MB）")
+    # ファイルサイズチェック（10MB制限）
+    if len(file_data) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="ファイルサイズが大きすぎます（最大10MB）")
     
     # データベースにOCR記録を作成
     try:
@@ -182,7 +180,7 @@ async def register_po(
 ):
     """
     POデータを登録します。
-    現行データベースモデルに対応した完全実装版
+    データベースモデルに対応した完全実装版
     """
     try:
         # POデータの検証
