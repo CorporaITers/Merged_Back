@@ -1,4 +1,6 @@
-from fastapi import FastAPI,HTTPException,Request
+# main.py - 現行コードをベースにOCR機能を統合した改良版
+
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime, timedelta
@@ -12,7 +14,6 @@ import mysql.connector
 from decimal import Decimal
 import pymysql
 from collections import defaultdict
-# from openai import OpenAI
 from openai import AzureOpenAI
 import httpx
 from pathlib import Path
@@ -23,15 +24,21 @@ import traceback
 from fastapi.responses import JSONResponse
 import camelot.io as camelot
 import warnings
-from app.app_router import router as po_router  # ← 上で変換したモジュールを読み込む
+from app.app_router import router as po_router
 from fastapi.exceptions import RequestValidationError
 import tempfile
 import csv
 
+# ========== OCR機能の統合（追加） ==========
+from app.routes import app as ocr_routes_app  # OCR関連のルート
+from app.config import (
+    DEV_MODE, LOG_LEVEL, OCR_TEMP_FOLDER, MAX_FILE_SIZE, ALLOWED_EXTENSIONS
+)
+
 # ローカル用 .env 読み込み（Azure環境では無視される）
 load_dotenv(override=True)
 
-# ログ設定
+# ログ設定（現行のものを維持）
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -40,29 +47,36 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-# pdfminerのログレベルをERRORに設定
+# pdfminerのログレベルをERRORに設定（現行のまま）
 for logger_name in ["pdfminer", "pdfminer.layout", "pdfminer.converter", "pdfminer.pdfinterp"]:
     logging.getLogger(logger_name).setLevel(logging.ERROR)
 
-# "Cannot set gray non-stroke color" の警告を抑制
+# 警告を抑制（現行のまま）
 warnings.filterwarnings("ignore", message="Cannot set gray non-stroke color")
 
-# api_key = os.getenv("OPENAI_API_KEY")
-# if not api_key:
-#     raise RuntimeError("❌ OPENAI_API_KEY が設定されていません。Azure の構成または .env を確認してください。")
-
-# client = OpenAI(api_key=api_key)
-
+# Azure OpenAI クライアント（現行のまま）
 client = AzureOpenAI(
     api_key=os.getenv("OPENAI_API_KEY"),
     api_version=os.getenv("OPENAI_API_VERSION"),
     azure_endpoint=os.getenv("OPENAI_API_BASE") or ""
 )
 
-app = FastAPI()
+# FastAPIアプリケーション作成
+app = FastAPI(
+    title="PO Management System",
+    description="Purchase Order Management with OCR capabilities and Shipping Schedule Integration",
+    version="1.0.0",
+    debug=DEV_MODE  # config.pyのDEV_MODEを使用
+)
 
+# ========== ルーターの統合（重要な修正） ==========
+# 既存のPOルーター
 app.include_router(po_router)
 
+# OCR機能ルーターの統合（新規追加）
+app.mount("/api", ocr_routes_app)  # OCRのエンドポイントを統合
+
+# バリデーションエラーハンドラー（現行のまま）
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     logger.error(f"バリデーションエラー: {exc.errors()}")
@@ -74,7 +88,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         }
     )
 
-# CORS設定（Next.jsとの連携のため）
+# CORS設定（現行のまま）
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -83,13 +97,50 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ========== 起動時処理の改良 ==========
 @app.on_event("startup")
 def on_startup():
+    """アプリケーション起動時の初期化処理"""
+    logger.info("🚀 PO Management System starting up...")
+    
+    # データベーステーブル作成（現行のまま）
     from app import models
     from app.database import engine
     models.Base.metadata.create_all(bind=engine)
+    
+    # OCR用一時ディレクトリの作成（新規追加）
+    try:
+        os.makedirs(OCR_TEMP_FOLDER, exist_ok=True)
+        logger.info(f"📁 OCR一時ディレクトリ作成完了: {OCR_TEMP_FOLDER}")
+    except Exception as e:
+        logger.error(f"❌ OCR一時ディレクトリ作成失敗: {e}")
+    
+    # Tesseractの動作確認（新規追加）
+    try:
+        import pytesseract
+        from app.config import TESSERACT_CMD
+        
+        if TESSERACT_CMD and os.path.exists(TESSERACT_CMD):
+            pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD
+            logger.info(f"🔍 Tesseract設定完了: {TESSERACT_CMD}")
+        else:
+            logger.info("🔍 Tesseractはデフォルトパスを使用します")
+            
+    except Exception as e:
+        logger.warning(f"⚠️ Tesseract設定警告: {e}")
+    
+    # データベース接続テスト（新規追加）
+    try:
+        from app.database import test_db_connection
+        test_db_connection()
+        logger.info("✅ データベース接続テスト成功")
+    except Exception as e:
+        logger.error(f"❌ データベース接続テスト失敗: {e}")
+    
+    # 古い一時ファイルのクリーンアップ（新規追加）
+    cleanup_temp_files()
 
-# MySQL接続情報
+# MySQL接続情報（現行のまま）
 DB_CONFIG = {
     "host": os.getenv("DB_HOST"),
     "user": os.getenv("DB_USER"),
@@ -98,17 +149,15 @@ DB_CONFIG = {
 }
 
 def get_db_connection():
+    """データベース接続を取得（現行のまま）"""
     return mysql.connector.connect(**DB_CONFIG)
 
 def format_date(date_obj: Optional[datetime]) -> str:
-    """ 日付オブジェクトを 'YYYY-MM-DD' 形式の文字列に変換 """
+    """日付オブジェクトを 'YYYY-MM-DD' 形式の文字列に変換（現行のまま）"""
     return date_obj.strftime("%Y-%m-%d") if date_obj else "N/A"
 
-# 🔽 この下に追加
 def get_freight_rate(departure_port: str, destination_port: str, shipping_company: str) -> Optional[float]:
-    """
-    運賃レートを取得して float 型で返す。取得できない場合は None を返す。
-    """
+    """運賃レートを取得して float 型で返す（現行のまま）"""
     try:
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
@@ -127,7 +176,6 @@ def get_freight_rate(departure_port: str, destination_port: str, shipping_compan
         if row and "freight_rate_usd" in row:
             value = row["freight_rate_usd"]
 
-            # ✅ Decimal を float に変換して返す
             if isinstance(value, Decimal):
                 return float(value)
             else:
@@ -138,10 +186,32 @@ def get_freight_rate(departure_port: str, destination_port: str, shipping_compan
 
     return None
 
+# ========== 一時ファイル管理機能（改良・統合） ==========
+def get_temp_file_path(prefix: str, suffix: str) -> str:
+    """Azure App Service対応の一時ファイルパス生成"""
+    temp_dir = OCR_TEMP_FOLDER  # config.pyの設定を使用
+    return os.path.join(temp_dir, f"{prefix}_{os.getpid()}_{int(datetime.now().timestamp())}{suffix}")
+
+def cleanup_temp_files(pattern: str = "*.pdf"):
+    """一時ディレクトリの古いファイルをクリーンアップ"""
+    import glob
+    pattern_path = os.path.join(OCR_TEMP_FOLDER, pattern)
+    
+    for file_path in glob.glob(pattern_path):
+        try:
+            # 1時間以上古いファイルを削除
+            if os.path.getctime(file_path) < (datetime.now().timestamp() - 3600):
+                os.remove(file_path)
+                logger.info(f"🧹 古い一時ファイルを削除: {file_path}")
+        except Exception as e:
+            logger.warning(f"一時ファイル削除失敗: {e}")
+
+# ========== 既存のAPIエンドポイント（現行のまま維持） ==========
+
 # 商品マスタ取得API
 TABLE_NAME = "shipping_company"
 
-#テスト用エンドポイント
+# テスト用エンドポイント（現行のまま）
 @app.get("/test-env")
 def test_env():
     openai_key = os.getenv("OPENAI_API_KEY")
@@ -152,9 +222,9 @@ def test_env():
 
 @app.get("/")
 async def root():
-    return {"message": "Hello, FastAPI!"}
+    return {"message": "PO Management System with OCR - Hello, FastAPI!"}
 
-# リクエストボディ定義
+# リクエストボディ定義（現行のまま）
 class ShippingRequest(BaseModel):
     departure_port: str
     destination_port: str
@@ -173,6 +243,7 @@ class FeedbackRequest(BaseModel):
     eta: str
     feedback: str
 
+# ========== PDFスケジュール解析機能（現行のまま） ==========
 async def extract_schedule_positions(
     url: str,
     departure: str,
@@ -180,14 +251,13 @@ async def extract_schedule_positions(
     etd_date: Optional[datetime] = None,
     eta_date: Optional[datetime] = None
 ):
+    """PDFスケジュール解析（現行のまま - 一時ファイル処理は既に改善済み）"""
     
     import os
     import json
     import re
     import requests
-    # import fitz  # PyMuPDF
     from datetime import datetime
-    # from openai import OpenAI
 
     DESTINATION_ALIASES = {
         "New York": ["NEW YORK", "NYC", "NEWYORK", "N.Y.", "NY", "NYO"],
@@ -233,7 +303,7 @@ async def extract_schedule_positions(
         "Nansha": ["NANSHA"],
         "Shenzhen": ["SHENZHEN"],
         "Tanjung Pelepas": ["TANJUNG PELEPAS", "TPP"],
-        "Port Kelang": ["PORT KELANG", "PORTKLANG"],  # 通称違い対応
+        "Port Kelang": ["PORT KELANG", "PORTKLANG"],
     }
 
     if not etd_date and not eta_date:
@@ -249,66 +319,35 @@ async def extract_schedule_positions(
         logger.error(f"❌ PDFのダウンロードに失敗しました。ステータスコード: {response.status_code}")
         return None
 
-    # logger.info("📁 temp_schedule.pdf を保存中...")
-    # with open("temp_schedule.pdf", "wb") as f:
-    #     f.write(response.content)
-    # logger.info("📄 PDFファイルをtemp_schedule.pdfとして保存しました。")
-
-    # doc = None
-    # try:
-        # logger.info("🔍 PDFを開いてテキスト抽出を開始します。")
-        # doc = fitz.open("temp_schedule.pdf")
-        # full_text = "\n".join(page.get_text("text") for page in doc)
-        # logger.info("✅ PDFからのテキスト抽出完了。")
-
-    # 修正1: tempfileを使用した安全な一時ファイル作成
+    # 一時ファイルを使用した安全な処理（現行コードの改良版）
     temp_pdf_file = None
     try:
-        # 一時ファイルを作成（Azure App Serviceでも安全）
+        # OCR_TEMP_FOLDERを使用して一時ファイル作成
         temp_pdf_file = tempfile.NamedTemporaryFile(
             suffix=".pdf", 
-            delete=False,  # 手動で削除制御
-            dir=tempfile.gettempdir()  # システムの一時ディレクトリを使用
+            delete=False,
+            dir=OCR_TEMP_FOLDER  # config.pyの設定を使用
         )
         
         logger.info(f"📁 一時PDFファイルを作成: {temp_pdf_file.name}")
         temp_pdf_file.write(response.content)
-        temp_pdf_file.flush()  # バッファを確実にフラッシュ
-        temp_pdf_file.close()  # ファイルハンドルを閉じる（重要）
+        temp_pdf_file.flush()
+        temp_pdf_file.close()
 
         # エイリアス生成（大文字化して正規化）
         aliases = DESTINATION_ALIASES.get(destination, [destination])
         aliases = [a.upper() for a in aliases]
 
-        # 候補行のみ抽出（日付 + 目的地エイリアスを含む行）
-        # lines = full_text.splitlines()
-        # candidate_lines = set()
-        # for i in range(len(lines)):
-        #     line_upper = lines[i].upper()
-        #     if re.search(r'\d{1,2}/\d{1,2}', line_upper) and any(alias in line_upper for alias in aliases):
-        #         block = lines[max(0, i - 2):min(len(lines), i + 3)]
-        #         candidate_lines.update(block)
-
-        # # トークン削減のため、文字数制限（例: 4096文字）
-        # condensed_text = "\n".join(candidate_lines)
-        # if len(condensed_text) > 4096:
-        #     condensed_text = condensed_text[:4096]  # GPT-4oのトークン制限に対応
-
-        # 修正2: 一時ファイルのパスを使用してCamelot処理
+        # PDFテーブル抽出
         logger.info(f"🔍 PDFテーブル抽出開始: {temp_pdf_file.name}")
-        # tables = camelot.read_pdf("temp_schedule.pdf", pages="all", flavor="stream")
         tables = camelot.read_pdf(temp_pdf_file.name, pages="all", flavor="stream")
         logger.info(f"抽出されたテーブル数: {len(tables)}")
-        # closest_entry = None
-        # closest_diff = float("inf")
 
         # テーブルデータを文字列形式に変換
         table_data = ""
         for i, table in enumerate(tables):
             table_data += f"\n--- テーブル {i + 1} ---\n"
             table_data += table.df.to_string()
-
-        # logger.info(f"抽出データ:\n{table_data}")
 
         prompt = f"""
 以下はPDFから抽出されたスケジュール候補の行です。
@@ -333,8 +372,6 @@ async def extract_schedule_positions(
 {table_data}
 """
 
-        # client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-
         chat_response = client.chat.completions.create(
             model="gpt-4o",
             messages=[
@@ -357,6 +394,7 @@ async def extract_schedule_positions(
                 "fare": "",
                 "schedule_url": url
             }
+            
         match = re.search(r'\{[\s\S]*?\}', reply_text)
         if not match:
             logger.warning("[WARNING] ChatGPTの返答がJSON形式でないため解析不可")
@@ -369,7 +407,7 @@ async def extract_schedule_positions(
                 "eta": "",
                 "fare": "",
                 "schedule_url": url
-                }
+            }
 
         try:
             info = json.loads(match.group())
@@ -377,15 +415,14 @@ async def extract_schedule_positions(
             eta_date_str = info.get("eta")
             vessel = info.get("vessel")
             voyage = info.get("voy")
-            company = info.get("company")  # ✅ JSON内の "company" を取得
+            company = info.get("company")
 
             # デフォルト値の設定（companyが取得できない場合）
             if not company:
                 company = "Unknown"
 
-            # 修正3: ログファイルも一時ディレクトリに作成
-            log_path = os.path.join(tempfile.gettempdir(), "gpt_feedback_log.csv")
-            # log_path = "gpt_feedback_log.csv"
+            # ログファイルも一時ディレクトリに作成
+            log_path = os.path.join(OCR_TEMP_FOLDER, "gpt_feedback_log.csv")
             new_entry = [
                 datetime.now().isoformat(),
                 url,
@@ -396,7 +433,7 @@ async def extract_schedule_positions(
                 eta_date_str,
                 vessel,
                 voyage,
-                company,  # ✅ company を保存
+                company,
                 "pending"
             ]
 
@@ -408,7 +445,7 @@ async def extract_schedule_positions(
                 writer.writerow(new_entry)
 
             return {
-                "company": company,  # ✅ JSON内の "company" を返す,
+                "company": company,
                 "fare": "$",
                 "etd": etd_date_str,
                 "eta": eta_date_str,
@@ -421,26 +458,25 @@ async def extract_schedule_positions(
             return {"error": "ChatGPTの返答がパースできませんでした", "raw_response": reply_text}
 
     except Exception as e:
-        # import logging
-        # logger = logging.getLogger(__name__)
         logger.error(f"PDF解析失敗: {e}")
         return None
 
     finally:
-        # 修正4: 確実なファイルクリーンアップ
+        # 確実なファイルクリーンアップ
         if temp_pdf_file:
             try:
-                # ファイルが存在する場合のみ削除
                 if os.path.exists(temp_pdf_file.name):
                     os.unlink(temp_pdf_file.name)
                     logger.info(f"🧹 一時PDFファイルを削除しました: {temp_pdf_file.name}")
             except Exception as cleanup_error:
                 logger.warning(f"[WARN] PDF削除に失敗: {cleanup_error}")
 
+# ========== 既存のPDFリンク取得機能（現行のまま） ==========
+
 async def get_pdf_links_from_one(destination_keyword: str) -> list[str]:
-    result = None  # 初期化
+    """ONE社のPDFリンク取得（現行のまま）"""
+    result = None
     try:
-        # app/get_pdf_links.py のパスを指定
         script_path = Path(__file__).resolve().parent / "app" / "get_pdf_links.py"
         cwd_path = script_path.parent
 
@@ -453,16 +489,13 @@ async def get_pdf_links_from_one(destination_keyword: str) -> list[str]:
             env=os.environ.copy(),
         )
 
-        # 正常な出力が存在する場合のみログ出力
         if result.stdout:
             logger.info(f"[DEBUG] get_pdf_links.py stdout:\n{result.stdout}")
         
-        # 出力結果を JSON としてパース
         return json.loads(result.stdout)
     
     except json.JSONDecodeError as je:
         logger.error(f"[ERROR] JSON Decode Error: {je}")
-        # result が None でない場合のみ stdout にアクセス
         if result and result.stdout:
             logger.error(f"[DEBUG] 実際の出力内容: {result.stdout}")
         else:
@@ -471,7 +504,6 @@ async def get_pdf_links_from_one(destination_keyword: str) -> list[str]:
     
     except subprocess.CalledProcessError as cpe:
         logger.error(f"[CalledProcessError] stderr:\n{cpe.stderr}")
-        # stdout が存在する場合のみログ出力
         if cpe.stdout:
             logger.error(f"[CalledProcessError] stdout:\n{cpe.stdout}")
         else:
@@ -481,12 +513,11 @@ async def get_pdf_links_from_one(destination_keyword: str) -> list[str]:
     except Exception as e:
         logger.error(f"[ERROR] ONE get_pdf_links 実行失敗: {e}")
         return []
-    
-# COSCOのPDFリンク取得用
+
 async def get_pdf_links_from_cosco(destination_keyword: str) -> list[str]:
-    result = None  # 初期化
+    """COSCO社のPDFリンク取得（現行のまま）"""
+    result = None
     try:
-        # get_cosco_pdf_links.py のフルパスを指定
         script_path = Path(__file__).resolve().parent / "app" / "get_cosco_pdf_links.py"
         cwd_path = script_path.parent
 
@@ -495,11 +526,10 @@ async def get_pdf_links_from_cosco(destination_keyword: str) -> list[str]:
             capture_output=True,
             text=True,
             check=True,
-            cwd=str(cwd_path),  # .envが読めるように
-            env=os.environ.copy(),  # 現在の環境変数を明示的に渡す（Playwrightの実行にも必要）
+            cwd=str(cwd_path),
+            env=os.environ.copy(),
         )
 
-        # 正常な場合のみログ出力
         if result.stdout:
             logger.info(f"[COSCO PDFリンク取得] stdout:\n{result.stdout}")
 
@@ -507,7 +537,6 @@ async def get_pdf_links_from_cosco(destination_keyword: str) -> list[str]:
 
     except json.JSONDecodeError as je:
         logger.error(f"[ERROR] JSON Decode Error: {je}")
-        # result が None でない場合のみ stdout にアクセス
         if result and result.stdout:
             logger.error(f"[DEBUG] 実際の出力内容: {result.stdout}")
         else:
@@ -516,7 +545,6 @@ async def get_pdf_links_from_cosco(destination_keyword: str) -> list[str]:
 
     except subprocess.CalledProcessError as spe:
         logger.error(f"[ERROR] CalledProcessError: {spe}")
-        # stdout と stderr が存在するかを確認してから出力
         if spe.stdout:
             logger.error(f"[stderr]\n{spe.stderr}")
         else:
@@ -531,10 +559,10 @@ async def get_pdf_links_from_cosco(destination_keyword: str) -> list[str]:
     except Exception as e:
         logger.error(f"[ERROR] COSCO get_pdf_links 実行失敗: {e}")
         return []
-    
-# KINKAのPDFリンク取得用
+
 async def get_pdf_links_from_kinka(destination_keyword: str) -> list[str]:
-    result = None  # 初期化
+    """KINKA社のPDFリンク取得（現行のまま）"""
+    result = None
     try:
         script_path = Path(__file__).resolve().parent / "app" / "get_kinka_pdf_links.py"
         cwd_path = script_path.parent
@@ -544,20 +572,17 @@ async def get_pdf_links_from_kinka(destination_keyword: str) -> list[str]:
             capture_output=True,
             text=True,
             check=True,
-            cwd=str(cwd_path),  # .envが読めるように
-            env=os.environ.copy(),  # 現在の環境変数を明示的に渡す（Playwrightの実行にも必要）
+            cwd=str(cwd_path),
+            env=os.environ.copy(),
         )
 
-        # 正常な場合のみ stdout をログ出力
         if result.stdout:
             logger.info(f"[KINKA PDFリンク取得] stdout:\n{result.stdout}")
         
-        # 出力を JSON としてパース
         return json.loads(result.stdout)
 
     except json.JSONDecodeError as je:
         logger.error(f"[ERROR] JSON Decode Error: {je}")
-        # result が None でない場合のみ stdout を参照
         if result and result.stdout:
             logger.error(f"[DEBUG] 実際の出力内容: {result.stdout}")
         else:
@@ -568,9 +593,9 @@ async def get_pdf_links_from_kinka(destination_keyword: str) -> list[str]:
         logger.error(f"[ERROR] KINKA get_pdf_links 実行失敗: {e}")
         return []
 
-# ShipmentlinkのPDFリンク取得用
 async def get_pdf_links_from_shipmentlink(departure_port: str, destination_port: str) -> list[str]:
-    result = None  # 初期化
+    """Shipmentlink のPDFリンク取得（現行のまま）"""
+    result = None
     try:
         script_path = Path(__file__).resolve().parent / "app" / "get_shipmentlink_pdf_links.py"
         cwd_path = script_path.parent
@@ -580,135 +605,24 @@ async def get_pdf_links_from_shipmentlink(departure_port: str, destination_port:
             capture_output=True,
             text=True,
             check=True,
-            cwd=str(cwd_path),  # .envが読めるように
-            env=os.environ.copy(),  # 現在の環境変数を明示的に渡す（Playwrightの実行にも必要）
+            cwd=str(cwd_path),
+            env=os.environ.copy(),
         )
 
         logger.info(f"[Shipmentlink PDF取得] raw stdout:\n{result.stdout}")
-        # JSONデコード後、URLデコード
         raw_links = json.loads(result.stdout)
-        decoded_links = [unquote(url) for url in raw_links]  # ✅ ここで一括変換
-        logger.info(f"[Shipmentlink PDF取得] decoded:\n{decoded_links}")  # ✅ ログに必ず出力！
+        decoded_links = [unquote(url) for url in raw_links]
+        logger.info(f"[Shipmentlink PDF取得] decoded:\n{decoded_links}")
         
         return decoded_links
     except Exception as e:
         logger.error(f"[Shipmentlink取得失敗] {e}")
         return []
 
-# FastAPI 内の非同期関数
-# async def get_schedule_from_maersk(departure: str, destination: str, etd_date: str) -> list[dict]:
-#     try:
-#         api_key = os.getenv("MAERSK_API_KEY")  # 環境変数から取得
-#         if not api_key:
-#             raise Exception("MAERSK_API_KEY が未設定です")
-
-#         # UN/LOCODE対応（例: Tokyo -> JP, Los Angeles -> US）
-#         ORIGIN_CODE_MAP = {
-#             "Tokyo": ("JP", "Tokyo"),
-#             "Shanghai": ("CN", "Shanghai")
-#         }
-#         DEST_CODE_MAP = {
-#             "Los Angeles": ("US", "Los Angeles"),
-#             "Long Beach": ("US", "Long Beach")
-#         }
-
-#         origin_country, origin_city = ORIGIN_CODE_MAP.get(departure, (None, None))
-#         dest_country, dest_city = DEST_CODE_MAP.get(destination, (None, None))
-
-#         if not origin_country or not dest_country:
-#             raise Exception(f"都市コード未対応: {departure} / {destination}")
-
-#         # APIエンドポイントとパラメータ
-#         url = "https://api.maersk.com/products/ocean-products"
-#         params = {
-#             "vesselOperatorCarrierCode": "MAEU",
-#             "collectionOriginCountryCode": origin_country,
-#             "collectionOriginCityName": origin_city,
-#             "deliveryDestinationCountryCode": dest_country,
-#             "deliveryDestinationCityName": dest_city,
-#         }
-
-#         headers = {
-#             "Consumer-Key": api_key,
-#             "Accept": "application/json"
-#         }
-
-#         async with httpx.AsyncClient() as client:
-#             response = await client.get(url, headers=headers, params=params, timeout=30.0)
-
-#         if response.status_code == 200:
-#             data = response.json()
-
-#             # 必要なフィールドのみ抽出して整形
-#             # ※下記はサンプル構成で、実際のレスポンスに合わせて調整必要
-#             results = []
-#             for item in data.get("schedules", []):
-#                 results.append({
-#                     "vessel": item.get("vesselName"),
-#                     "etd": item.get("departureDate"),
-#                     "eta": item.get("arrivalDate"),
-#                     "service": item.get("serviceName"),
-#                 })
-
-#             return results
-#         else:
-#             logger.warning(f"Maersk APIエラー: {response.status_code} - {response.text}")
-#             return []
-
-#     except Exception as e:
-#         logger.error(f"[Maersk API取得例外] {str(e)}")
-#         return []
-
-# Hapag-Lloydのスケジュール取得関数を追加
-# async def get_schedule_from_hapaglloyd(departure: str, destination: str) -> list[dict]:
-#     from playwright.async_api import async_playwright
-#     results = []
-#     try:
-#         async with async_playwright() as p:
-#             browser = await p.chromium.launch(headless=True)
-#             page = await browser.new_page()
-#             await page.goto("https://www.hapag-lloyd.com/solutions/schedule/#/", timeout=60000)
-#             await page.wait_for_load_state("networkidle")
-
-#             from_input = await page.wait_for_selector('input[aria-label="From"]', timeout=10000)
-#             await from_input.fill(departure)
-#             await page.wait_for_timeout(500)
-#             await page.keyboard.press("ArrowDown")
-#             await page.keyboard.press("Enter")
-
-#             to_input = await page.wait_for_selector('input[aria-label="To"]', timeout=10000)
-#             await to_input.fill(destination)
-#             await page.wait_for_timeout(500)
-#             await page.keyboard.press("ArrowDown")
-#             await page.keyboard.press("Enter")
-
-#             await page.click('button:has-text("Search")')
-
-#             await page.wait_for_selector('.schedule-table-container', timeout=20000)
-#             rows = await page.query_selector_all('.schedule-table-container tbody tr')
-
-#             for row in rows[:3]:
-#                 cols = await row.query_selector_all('td')
-#                 if len(cols) >= 5:
-#                     vessel = await cols[0].inner_text()
-#                     etd = await cols[2].inner_text()
-#                     eta = await cols[3].inner_text()
-#                     results.append({
-#                         "company": "Hapag-Lloyd",
-#                         "vessel": vessel.strip(),
-#                         "etd": etd.strip(),
-#                         "eta": eta.strip(),
-#                         "fare": "",
-#                         "schedule_url": page.url,
-#                         "raw_response": f"{vessel.strip()} {etd.strip()}->{eta.strip()}"
-#                     })
-#             await browser.close()
-#     except Exception as e:
-#         logger.error(f"[Hapag-Lloyd ERROR] {e}")
-#     return results
-
+# ========== 船舶スケジュール推奨API（現行のまま） ==========
 @app.post("/recommend-shipping")
 async def recommend_shipping(req: ShippingRequest):
+    """船舶スケジュール推奨API（現行のまま）"""
     logger.info("📦 リクエスト受信:")
     logger.info(f"  Departure Port: {req.departure_port}")
     logger.info(f"  Destination Port: {req.destination_port}")
@@ -726,7 +640,7 @@ async def recommend_shipping(req: ShippingRequest):
 
     results = []
 
-    # ========== ONE社 ==========
+    # ONE社の処理
     logger.info(f"🔍 ONE社 get_pdf_links.py に渡すキーワード: '{keyword}'")
     pdf_urls_one = await get_pdf_links_from_one(keyword)
     if not pdf_urls_one:
@@ -745,9 +659,9 @@ async def recommend_shipping(req: ShippingRequest):
                 result["fare"] = str(get_freight_rate(departure, destination, "ONE")) if not None else "N/A"
                 results.append(result)
                 logger.info(f"[ONE社マッチ] {result}")
-                break  # 最初のマッチで止める
+                break
 
-    # ========== COSCO社 ==========
+    # COSCO社の処理
     logger.info(f"🔍 COSCO社 get_cosco_pdf_links.py に渡すキーワード: '{keyword}'")
     pdf_urls_cosco = await get_pdf_links_from_cosco(keyword)
     if not pdf_urls_cosco:
@@ -766,9 +680,9 @@ async def recommend_shipping(req: ShippingRequest):
                 result["fare"] = str(get_freight_rate(departure, destination, "COSCO")) if not None else "N/A"
                 results.append(result)
                 logger.info(f"[COSCO社マッチ] {result}")
-                break  # 最初のマッチで止める
+                break
 
-# ========== KINKA社（目的地が「上海」の場合のみ） ==========
+    # KINKA社の処理（上海の場合のみ）
     if "上海" in keyword or "Shanghai" in keyword:
         logger.info(f"🔍 KINKA社 get_kinka_pdf_links.py に渡すキーワード: '{keyword}'")
         pdf_urls_kinka = await get_pdf_links_from_kinka(keyword)
@@ -788,11 +702,11 @@ async def recommend_shipping(req: ShippingRequest):
                     result["fare"] = str(get_freight_rate(departure, destination, "KINKA")) if not None else "N/A"
                     results.append(result)
                     logger.info(f"[KINKA社マッチ] {result}")
-                    break  # 最初のマッチで止める
+                    break
     else:
         logger.info("📛 KINKA社は『上海』のときのみ検索対象となるため、今回はスキップされました。")
 
-# ========== Evergreen社 ========== 
+    # Evergreen社の処理
     logger.info(f"🔍 Evergreen社 get_pdf_links.py に渡すキーワード: '{keyword}'")
     pdf_urls_shipmentlink = await get_pdf_links_from_shipmentlink(departure, destination)
     
@@ -814,53 +728,30 @@ async def recommend_shipping(req: ShippingRequest):
                 results.append(result)
                 logger.info(f"[Evergreen社マッチ] {result}")
                 success = True
-                break  # 最初のマッチで止める
+                break
         if not success:
             logger.warning("⚠️ Evergreen社のスケジュール抽出に失敗しました。")
 
-    # ========== Maersk社 ========== 
-    # maersk_result = await get_schedule_from_maersk(departure, destination, etd_date=req.etd_date)
-
-    # if maersk_result:
-    #     for r in maersk_result:
-    #         r["company"] = "Maersk"
-    #         result["fare"] = get_freight_rate(departure, destination, "Maersk")
-    #         results.append(r)
-    #     logger.info(f"[Maersk API 成功] {len(maersk_result)} 件取得")
-
-    # ========== Hapag-Lloyd社 ========== 
-    # try:
-    #     hl_start_date = req.etd_date or req.eta_date
-    #     logger.info(f"🔍 Hapag-Lloyd社 スケジュール取得を実行します: {departure} → {destination} | {hl_start_date}")
-    #     hl_results = await get_schedule_from_hapaglloyd(departure, destination, hl_start_date)
-    #     if hl_results:
-    #         results.extend(hl_results)
-    #         logger.info(f"[Hapag-Lloyd社マッチ] {hl_results}")
-    # except Exception as e:
-    #     logger.warning(f"[Hapag-Lloyd社取得失敗] {e}")
-
-    # ========== 結果返却 ==========
+    # 結果返却
     if results:
         logger.info(f"[✅MATCHED] {len(results)}件のスケジュールが見つかりました")
-        return results  # ← 配列として返す
+        return results
     else:
         logger.warning("❌ 全社のいずれにもマッチしませんでした")
-        return []  # ← 空のリストで返す（フロントで [] を扱えるようにする）
-    
+        return []
 
 @app.post("/update-feedback")
 async def update_feedback(data: FeedbackRequest):
+    """フィードバック更新API（現行のまま、ただし一時ディレクトリ使用）"""
     logger.info(f"フィードバック受信: URL={data.url}, ETD={data.etd}, ETA={data.eta}, Feedback={data.feedback}")
     try:
-        # 修正5: ログファイルも一時ディレクトリに保存
-        log_path = os.path.join(tempfile.gettempdir(), "gpt_feedback_log.csv")
+        # ログファイルも一時ディレクトリに保存
+        log_path = os.path.join(OCR_TEMP_FOLDER, "gpt_feedback_log.csv")
         
-        # ファイルの存在確認と作成
         file_exists = os.path.exists(log_path)
         with open(log_path, "a", encoding="utf-8", newline='') as f:
             writer = csv.writer(f)
             if not file_exists:
-                # ヘッダー行を追加
                 writer.writerow(["timestamp", "url", "etd", "eta", "feedback"])
             writer.writerow([
                 datetime.now().isoformat(),
@@ -875,68 +766,72 @@ async def update_feedback(data: FeedbackRequest):
         logger.exception("フィードバック記録中にエラー")
         raise HTTPException(status_code=500, detail="フィードバックの保存に失敗しました。")
 
-# ========== 追加: 一時ファイル管理のユーティリティ関数 ==========
-
-def get_temp_file_path(prefix: str, suffix: str) -> str:
-    """
-    Azure App Service対応の一時ファイルパス生成
-    """
-    temp_dir = tempfile.gettempdir()
-    return os.path.join(temp_dir, f"{prefix}_{os.getpid()}_{int(datetime.now().timestamp())}{suffix}")
-
-def cleanup_temp_files(pattern: str = "*.pdf"):
-    """
-    一時ディレクトリの古いファイルをクリーンアップ
-    """
-    import glob
-    temp_dir = tempfile.gettempdir()
-    pattern_path = os.path.join(temp_dir, pattern)
-    
-    for file_path in glob.glob(pattern_path):
-        try:
-            # 1時間以上古いファイルを削除
-            if os.path.getctime(file_path) < (datetime.now().timestamp() - 3600):
-                os.remove(file_path)
-                logger.info(f"🧹 古い一時ファイルを削除: {file_path}")
-        except Exception as e:
-            logger.warning(f"一時ファイル削除失敗: {e}")
-
-# 定期的なクリーンアップをスケジュール
-@app.on_event("startup")
-async def startup_cleanup():
-    """アプリ起動時に古い一時ファイルをクリーンアップ"""
-    cleanup_temp_files()
-
-# ========== ヘルスチェックエンドポイントの修正 ==========
-
+# ========== ヘルスチェック（OCR機能対応版） ==========
 @app.get("/health")
 async def health_check():
-    """Azure App Service のヘルスチェック用（一時ディレクトリアクセス確認付き）"""
+    """
+    Azure App Service のヘルスチェック用
+    （データベース、OpenAI、OCR機能、一時ディレクトリアクセス確認付き）
+    """
     try:
-        # データベース接続確認
-        conn = get_db_connection()
-        conn.close()
-        
-        # OpenAI接続確認
-        test_response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": "test"}],
-            max_tokens=1
-        )
-        
-        # 一時ディレクトリの書き込み権限確認
-        temp_test_file = tempfile.NamedTemporaryFile(delete=True)
-        temp_test_file.write(b"health check")
-        temp_test_file.close()
-        
-        return {
+        health_status = {
             "status": "healthy",
             "timestamp": datetime.now().isoformat(),
-            "database": "connected",
-            "openai": "connected",
-            "temp_directory": tempfile.gettempdir(),
-            "temp_access": "writable"
+            "services": {}
         }
+        
+        # データベース接続確認
+        try:
+            conn = get_db_connection()
+            conn.close()
+            health_status["services"]["database"] = "connected"
+        except Exception as db_error:
+            health_status["services"]["database"] = f"error: {str(db_error)}"
+        
+        # OpenAI接続確認
+        try:
+            test_response = client.chat.completions.create(
+                model="gpt-4o",
+                messages=[{"role": "user", "content": "test"}],
+                max_tokens=1
+            )
+            health_status["services"]["openai"] = "connected"
+        except Exception as openai_error:
+            health_status["services"]["openai"] = f"error: {str(openai_error)}"
+        
+        # 一時ディレクトリの書き込み権限確認
+        try:
+            temp_test_file = tempfile.NamedTemporaryFile(delete=True, dir=OCR_TEMP_FOLDER)
+            temp_test_file.write(b"health check")
+            temp_test_file.close()
+            health_status["services"]["temp_directory"] = "writable"
+        except Exception as temp_error:
+            health_status["services"]["temp_directory"] = f"error: {str(temp_error)}"
+        
+        # Tesseract確認
+        try:
+            import pytesseract
+            pytesseract.get_tesseract_version()
+            health_status["services"]["tesseract"] = "available"
+        except Exception as tesseract_error:
+            health_status["services"]["tesseract"] = f"error: {str(tesseract_error)}"
+        
+        # 設定情報
+        health_status["config"] = {
+            "ocr_temp_folder": OCR_TEMP_FOLDER,
+            "max_file_size_mb": MAX_FILE_SIZE / (1024 * 1024),
+            "allowed_extensions": list(ALLOWED_EXTENSIONS),
+            "dev_mode": DEV_MODE
+        }
+        
+        # 全体的なステータス判定
+        error_services = [k for k, v in health_status["services"].items() if "error" in str(v)]
+        if error_services:
+            health_status["status"] = "degraded"
+            health_status["warning"] = f"以下のサービスにエラーがあります: {', '.join(error_services)}"
+        
+        return health_status
+        
     except Exception as e:
         return {
             "status": "unhealthy", 
@@ -944,24 +839,39 @@ async def health_check():
             "timestamp": datetime.now().isoformat()
         }
 
-# -------------------------------
-# エラーハンドリングミドルウェア
-# -------------------------------
+# ========== 終了時処理の追加 ==========
+@app.on_event("shutdown")
+async def shutdown_event():
+    """アプリケーション終了時の処理"""
+    logger.info("🛑 PO Management System shutting down...")
+    
+    # 終了時に一時ファイルをクリーンアップ
+    try:
+        cleanup_temp_files("*")  # 全ての一時ファイルを削除
+        logger.info("🧹 終了時クリーンアップ完了")
+    except Exception as e:
+        logger.warning(f"終了時クリーンアップエラー: {e}")
+
+# エラーハンドリングミドルウェア（現行のまま）
 @app.middleware("http")
 async def catch_exceptions_middleware(request: Request, call_next):
     try:
         return await call_next(request)
     except Exception as e:
-        # エラーの詳細をログに書く（ファイル・行番号含む）
         error_trace = traceback.format_exc()
         logger.exception("未処理の例外が発生しました:\n%s", error_trace)
-
-        # Swagger上で詳細表示
+        
         return JSONResponse(
             status_code=500,
-            content={"detail": error_trace}  # ← エラーの詳細なスタックトレース付き
+            content={"detail": error_trace}
         )
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(
+        app, 
+        host="0.0.0.0", 
+        port=8000,
+        reload=DEV_MODE,  # 開発モードの場合のみreload
+        log_level=LOG_LEVEL.lower()
+    )
