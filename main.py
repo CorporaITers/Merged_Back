@@ -25,6 +25,8 @@ import camelot.io as camelot
 import warnings
 from app.app_router import router as po_router  # ← 上で変換したモジュールを読み込む
 from fastapi.exceptions import RequestValidationError
+import tempfile
+import csv
 
 # ローカル用 .env 読み込み（Azure環境では無視される）
 load_dotenv(override=True)
@@ -180,7 +182,6 @@ async def extract_schedule_positions(
 ):
     
     import os
-    import csv
     import json
     import re
     import requests
@@ -248,17 +249,32 @@ async def extract_schedule_positions(
         logger.error(f"❌ PDFのダウンロードに失敗しました。ステータスコード: {response.status_code}")
         return None
 
-    logger.info("📁 temp_schedule.pdf を保存中...")
-    with open("temp_schedule.pdf", "wb") as f:
-        f.write(response.content)
-    logger.info("📄 PDFファイルをtemp_schedule.pdfとして保存しました。")
+    # logger.info("📁 temp_schedule.pdf を保存中...")
+    # with open("temp_schedule.pdf", "wb") as f:
+    #     f.write(response.content)
+    # logger.info("📄 PDFファイルをtemp_schedule.pdfとして保存しました。")
 
-    doc = None
-    try:
+    # doc = None
+    # try:
         # logger.info("🔍 PDFを開いてテキスト抽出を開始します。")
         # doc = fitz.open("temp_schedule.pdf")
         # full_text = "\n".join(page.get_text("text") for page in doc)
         # logger.info("✅ PDFからのテキスト抽出完了。")
+
+    # 修正1: tempfileを使用した安全な一時ファイル作成
+    temp_pdf_file = None
+    try:
+        # 一時ファイルを作成（Azure App Serviceでも安全）
+        temp_pdf_file = tempfile.NamedTemporaryFile(
+            suffix=".pdf", 
+            delete=False,  # 手動で削除制御
+            dir=tempfile.gettempdir()  # システムの一時ディレクトリを使用
+        )
+        
+        logger.info(f"📁 一時PDFファイルを作成: {temp_pdf_file.name}")
+        temp_pdf_file.write(response.content)
+        temp_pdf_file.flush()  # バッファを確実にフラッシュ
+        temp_pdf_file.close()  # ファイルハンドルを閉じる（重要）
 
         # エイリアス生成（大文字化して正規化）
         aliases = DESTINATION_ALIASES.get(destination, [destination])
@@ -278,8 +294,10 @@ async def extract_schedule_positions(
         # if len(condensed_text) > 4096:
         #     condensed_text = condensed_text[:4096]  # GPT-4oのトークン制限に対応
 
-        # Camelotでテーブル抽出
-        tables = camelot.read_pdf("temp_schedule.pdf", pages="all", flavor="stream")
+        # 修正2: 一時ファイルのパスを使用してCamelot処理
+        logger.info(f"🔍 PDFテーブル抽出開始: {temp_pdf_file.name}")
+        # tables = camelot.read_pdf("temp_schedule.pdf", pages="all", flavor="stream")
+        tables = camelot.read_pdf(temp_pdf_file.name, pages="all", flavor="stream")
         logger.info(f"抽出されたテーブル数: {len(tables)}")
         # closest_entry = None
         # closest_diff = float("inf")
@@ -365,7 +383,9 @@ async def extract_schedule_positions(
             if not company:
                 company = "Unknown"
 
-            log_path = "gpt_feedback_log.csv"
+            # 修正3: ログファイルも一時ディレクトリに作成
+            log_path = os.path.join(tempfile.gettempdir(), "gpt_feedback_log.csv")
+            # log_path = "gpt_feedback_log.csv"
             new_entry = [
                 datetime.now().isoformat(),
                 url,
@@ -407,19 +427,15 @@ async def extract_schedule_positions(
         return None
 
     finally:
-        try:
-            if doc:
-                doc.close()
-        except:
-            pass
-        try:
-            os.remove("temp_schedule.pdf")
-            logger.info("🧹 一時PDFファイルを削除しました。")
-        except Exception as e:
-            # import logging
-            # logger = logging.getLogger(__name__)
-            logger.warning(f"[WARN] PDF削除に失敗: {e}")
-
+        # 修正4: 確実なファイルクリーンアップ
+        if temp_pdf_file:
+            try:
+                # ファイルが存在する場合のみ削除
+                if os.path.exists(temp_pdf_file.name):
+                    os.unlink(temp_pdf_file.name)
+                    logger.info(f"🧹 一時PDFファイルを削除しました: {temp_pdf_file.name}")
+            except Exception as cleanup_error:
+                logger.warning(f"[WARN] PDF削除に失敗: {cleanup_error}")
 
 async def get_pdf_links_from_one(destination_keyword: str) -> list[str]:
     result = None  # 初期化
@@ -836,12 +852,97 @@ async def recommend_shipping(req: ShippingRequest):
 async def update_feedback(data: FeedbackRequest):
     logger.info(f"フィードバック受信: URL={data.url}, ETD={data.etd}, ETA={data.eta}, Feedback={data.feedback}")
     try:
-        with open("gpt_feedback_log.csv", "a", encoding="utf-8", newline='') as f:
-            f.write(f'{data.url},{data.etd},{data.eta},{data.feedback}\n')
+        # 修正5: ログファイルも一時ディレクトリに保存
+        log_path = os.path.join(tempfile.gettempdir(), "gpt_feedback_log.csv")
+        
+        # ファイルの存在確認と作成
+        file_exists = os.path.exists(log_path)
+        with open(log_path, "a", encoding="utf-8", newline='') as f:
+            writer = csv.writer(f)
+            if not file_exists:
+                # ヘッダー行を追加
+                writer.writerow(["timestamp", "url", "etd", "eta", "feedback"])
+            writer.writerow([
+                datetime.now().isoformat(),
+                data.url,
+                data.etd,
+                data.eta,
+                data.feedback
+            ])
+        
         return {"message": "フィードバックを記録しました。"}
     except Exception as e:
         logger.exception("フィードバック記録中にエラー")
         raise HTTPException(status_code=500, detail="フィードバックの保存に失敗しました。")
+
+# ========== 追加: 一時ファイル管理のユーティリティ関数 ==========
+
+def get_temp_file_path(prefix: str, suffix: str) -> str:
+    """
+    Azure App Service対応の一時ファイルパス生成
+    """
+    temp_dir = tempfile.gettempdir()
+    return os.path.join(temp_dir, f"{prefix}_{os.getpid()}_{int(datetime.now().timestamp())}{suffix}")
+
+def cleanup_temp_files(pattern: str = "*.pdf"):
+    """
+    一時ディレクトリの古いファイルをクリーンアップ
+    """
+    import glob
+    temp_dir = tempfile.gettempdir()
+    pattern_path = os.path.join(temp_dir, pattern)
+    
+    for file_path in glob.glob(pattern_path):
+        try:
+            # 1時間以上古いファイルを削除
+            if os.path.getctime(file_path) < (datetime.now().timestamp() - 3600):
+                os.remove(file_path)
+                logger.info(f"🧹 古い一時ファイルを削除: {file_path}")
+        except Exception as e:
+            logger.warning(f"一時ファイル削除失敗: {e}")
+
+# 定期的なクリーンアップをスケジュール
+@app.on_event("startup")
+async def startup_cleanup():
+    """アプリ起動時に古い一時ファイルをクリーンアップ"""
+    cleanup_temp_files()
+
+# ========== ヘルスチェックエンドポイントの修正 ==========
+
+@app.get("/health")
+async def health_check():
+    """Azure App Service のヘルスチェック用（一時ディレクトリアクセス確認付き）"""
+    try:
+        # データベース接続確認
+        conn = get_db_connection()
+        conn.close()
+        
+        # OpenAI接続確認
+        test_response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": "test"}],
+            max_tokens=1
+        )
+        
+        # 一時ディレクトリの書き込み権限確認
+        temp_test_file = tempfile.NamedTemporaryFile(delete=True)
+        temp_test_file.write(b"health check")
+        temp_test_file.close()
+        
+        return {
+            "status": "healthy",
+            "timestamp": datetime.now().isoformat(),
+            "database": "connected",
+            "openai": "connected",
+            "temp_directory": tempfile.gettempdir(),
+            "temp_access": "writable"
+        }
+    except Exception as e:
+        return {
+            "status": "unhealthy", 
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
 
 # -------------------------------
 # エラーハンドリングミドルウェア
