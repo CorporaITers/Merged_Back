@@ -29,13 +29,14 @@ from app import config
 
 
 
-# ロギングの設定
+# ========== 修正2: ログ設定の改善（Azure App Service対応） ==========
+temp_log_path = os.path.join(tempfile.gettempdir(), "app.log")
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler("app.log")
+        logging.FileHandler(temp_log_path)  # 一時ディレクトリを使用
     ]
 )
 logger = logging.getLogger(__name__)
