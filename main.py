@@ -962,6 +962,6 @@ async def catch_exceptions_middleware(request: Request, call_next):
             content={"detail": error_trace}  # ← エラーの詳細なスタックトレース付き
         )
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+# if __name__ == "__main__":
+#     import uvicorn
+#     uvicorn.run(app, host="0.0.0.0", port=8000)
