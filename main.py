@@ -80,15 +80,7 @@ app.add_middleware(
     allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
-    # allow_headers=["*"],
-    allow_headers=[
-        "Authorization",
-        "Content-Type",
-        "Accept",
-        "Origin",
-        "X-Requested-With"
-    ],
-    expose_headers=["Authorization"]
+    allow_headers=["*"],
 )
 
 @app.on_event("startup")
@@ -970,6 +962,6 @@ async def catch_exceptions_middleware(request: Request, call_next):
             content={"detail": error_trace}  # ← エラーの詳細なスタックトレース付き
         )
 
-# if __name__ == "__main__":
-#     import uvicorn
-#     uvicorn.run(app, host="0.0.0.0", port=8000)
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
