@@ -1,15 +1,13 @@
-# #!/bin/bash
+#!/bin/bash
 
-# # OCRツールのインストール（3回までリトライ）
-# for i in 1 2 3; do
-#   apt-get update && \
-#   apt-get install -y --fix-missing -o Acquire::http::No-Cache=true \
-#     poppler-utils tesseract-ocr tesseract-ocr-eng tesseract-ocr-jpn && break || sleep 10
-# done
+# パッケージの更新と必要なパッケージのインストール
+apt-get update && \
+apt-get install -y poppler-utils tesseract-ocr tesseract-ocr-eng tesseract-ocr-jpn
 
-# # Python依存ライブラリのインストール
-# python -m pip install --upgrade pip
-# python -m pip install -r requirements.txt
+# Pythonパッケージのアップグレードとインストール
+python -m pip install --upgrade pip && \
+python -m pip install -r requirements.txt
 
-# # FastAPIアプリの起動
-# gunicorn -w 4 -k uvicorn.workers.UvicornWorker main:app --bind 0.0.0.0:8000 --timeout 120
+# FastAPI アプリケーションの起動
+exec uvicorn main:app --host 0.0.0.0 --port 8000
+
