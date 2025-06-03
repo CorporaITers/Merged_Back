@@ -27,16 +27,13 @@ from app.auth import create_access_token, get_password_hash, verify_password, ge
 from app.ocr_service import process_document, extract_po_data
 from app import config
 
-
-
-# ========== 修正2: ログ設定の改善（Azure App Service対応） ==========
-temp_log_path = os.path.join(tempfile.gettempdir(), "app.log")
+# ロギングの設定
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler(temp_log_path)  # 一時ディレクトリを使用
+        logging.FileHandler("app.log")
     ]
 )
 logger = logging.getLogger(__name__)
